@@ -1,0 +1,16 @@
+# SSH Configuration for LaunchRadar CAX11 Deployment
+# Add this to your ~/.ssh/config file
+
+Host launchradar-cax11
+    HostName YOUR_SERVER_IP_HERE
+    User root
+    IdentityFile ~/.ssh/launchradar-deploy
+    IdentitiesOnly yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+
+# Usage after server creation:
+# ssh launchradar-cax11
+# scp file.tar.gz launchradar-cax11:~/

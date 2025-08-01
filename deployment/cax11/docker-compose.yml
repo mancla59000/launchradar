@@ -1,0 +1,226 @@
+version: '3.8'
+
+# LaunchRadar CAX11 ARM64 Optimized Configuration
+# Hetzner CAX11: 2 CPU ARM, 4GB RAM, 40GB SSD - 3.29€/mois
+# Total Memory Usage: ~2.4GB (Marge 1.6GB)
+
+services:
+  # Next.js Application - ARM64 Optimized
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+      platforms:
+        - linux/arm64
+    container_name: launchradar-web
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      # CAX11 ARM Performance Optimizations
+      - NODE_OPTIONS=--max-old-space-size=1024
+      - UV_THREADPOOL_SIZE=2
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - launchradar
+    deploy:
+      resources:
+        limits:
+          memory: 1.2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.3'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Twitter Collector - ARM64 Optimized
+  twitter-collector:
+    build:
+      context: ..
+      dockerfile: Dockerfile.collector
+      platforms:
+        - linux/arm64
+    container_name: launchradar-twitter
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - TWITTER_BEARER_TOKEN=${TWITTER_BEARER_TOKEN}
+      - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - WORKER_TYPE=twitter
+      - COLLECTION_INTERVAL=7200 # 2 hours for CAX11 resource optimization
+      - MAX_POSTS_PER_BATCH=50 # Reduced for ARM performance
+      - NODE_OPTIONS=--max-old-space-size=200
+    volumes:
+      - ../logs:/app/logs
+    networks:
+      - launchradar
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # Reddit Collector - ARM64 Optimized
+  reddit-collector:
+    build:
+      context: ..
+      dockerfile: Dockerfile.collector
+      platforms:
+        - linux/arm64
+    container_name: launchradar-reddit
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET}
+      - REDDIT_USERNAME=${REDDIT_USERNAME}
+      - REDDIT_PASSWORD=${REDDIT_PASSWORD}
+      - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - WORKER_TYPE=reddit
+      - COLLECTION_INTERVAL=10800 # 3 hours for CAX11 resource optimization
+      - MAX_POSTS_PER_BATCH=25 # Reduced for ARM performance
+      - NODE_OPTIONS=--max-old-space-size=200
+    volumes:
+      - ../logs:/app/logs
+    networks:
+      - launchradar
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # Scoring Engine - ARM64 Optimized
+  scoring-engine:
+    build:
+      context: ..
+      dockerfile: Dockerfile.scoring
+      platforms:
+        - linux/arm64
+    container_name: launchradar-scoring
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - PROCESSING_INTERVAL=3600 # 1 hour for CAX11 optimization
+      - BATCH_SIZE=100 # Optimized for ARM performance
+      - NODE_OPTIONS=--max-old-space-size=400
+    volumes:
+      - ../logs:/app/logs
+    networks:
+      - launchradar
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.2'
+
+  # Redis - ARM64 Compatible
+  redis:
+    image: redis:7-alpine
+    container_name: launchradar-redis
+    restart: unless-stopped
+    command: |
+      redis-server 
+      --appendonly yes 
+      --maxmemory 96mb 
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --tcp-keepalive 60
+    volumes:
+      - redis_data:/data
+    networks:
+      - launchradar
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.15'
+        reservations:
+          memory: 64M
+          cpus: '0.05'
+
+  # Nginx Reverse Proxy - ARM64 Compatible
+  nginx:
+    image: nginx:alpine
+    container_name: launchradar-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ../logs/nginx:/var/log/nginx
+    depends_on:
+      - web
+    networks:
+      - launchradar
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+
+  # Uptime Monitoring - ARM64 Compatible (Optional for CAX11)
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: launchradar-uptime
+    restart: unless-stopped
+    volumes:
+      - uptime_data:/app/data
+    ports:
+      - "3001:3001"
+    networks:
+      - launchradar
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.15'
+        reservations:
+          memory: 64M
+          cpus: '0.05'
+    # Optionnel: Désactiver si ressources limitées
+    profiles:
+      - monitoring
+
+volumes:
+  redis_data:
+  uptime_data:
+
+networks:
+  launchradar:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# CAX11 ARM64 Performance Profile Summary:
+# Total Memory: ~2.4GB / 4GB (60% usage, 40% free)
+# Total CPU: ~2.4 cores / 2 cores (optimized with burstable limits)
+# Cost: 3.29€/mois + 15€ Supabase = 18.29€/mois total
